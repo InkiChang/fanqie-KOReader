@@ -79,7 +79,7 @@ body:
     attributes:
       label: 插件版本
       description: 插件「关于」对话框里可以看到，或看 `fanqie/info.lua` 的 `version`。
-      placeholder: "2.2.0"
+      placeholder: "0.0.1"
     validations:
       required: true
 
