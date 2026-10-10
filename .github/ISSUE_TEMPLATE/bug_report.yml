@@ -1,0 +1,108 @@
+name: 缺陷报告
+description: 插件行为不对、报错、崩溃
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量把下面填完整——这个插件的故障大多数只在特定设备
+        和特定接口状态下出现，缺一项我们就得来回问一轮。
+
+        ⚠️ **贴日志前请抹掉 `sessionid`、`install_id`、`device_id`。**
+        这些是登录凭据，公开发出来等于把账号送人。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 你期望的结果，和实际看到的结果。
+      placeholder: |
+        期望：打开《书名》后能正常翻章
+        实际：打开后卡在"正在获取目录…"，30 秒后提示超时
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从零开始的最小步骤。能稳定复现的 bug 才修得掉。
+      placeholder: |
+        1. 工具 → 番茄小说 → 设置有书源选"番茄官方"
+        2. 打开书架里的第二本书
+        3. 等目录加载
+        4. 翻到第 3 章
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: 使用的数据源
+      description: 不同数据源的故障原因完全不同，这一项很关键。
+      options:
+        - 番茄官方（移动端）
+        - 番茄官方（网页端）
+        - 晴天书源
+        - 大灰狼书源
+        - 不确定 / 自动切换
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: 设备
+      options:
+        - Kindle
+        - Kobo
+        - PocketBook
+        - reMarkable
+        - Android（手机 / 平板）
+        - Linux 桌面
+        - 其他（请在下方说明）
+    validations:
+      required: true
+
+  - type: input
+    id: koreader-version
+    attributes:
+      label: KOReader 版本
+      description: KOReader 里「工具 → 关于」可以看到。
+      placeholder: "v2026.07.1"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      description: 插件「关于」对话框里可以看到，或看 `fanqie/info.lua` 的 `version`。
+      placeholder: "2.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 报错截图
+      description: |
+        KOReader 的崩溃日志通常在设备存储根目录的 `crash.log`。
+        也可以把插件设置里的「记录日志」打开后再复现一次。
+        **记得先抹掉凭据。**
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已经确认日志里没有 `sessionid` / `install_id` / `device_id` 等凭据
+          required: true
+        - label: 我已经搜索过现有 issue，没有重复
+          required: true
+        - label: 我理解插件走的是非官方接口，接口变动导致的失效不一定是缺陷
+          required: true

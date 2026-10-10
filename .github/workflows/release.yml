@@ -1,0 +1,93 @@
+name: Release
+
+# 打 tag（形如 v2.2.0）时自动构建并发布可安装的插件包。
+# 发布物只有两样：zip 本体和它的 sha256 —— 用户拿到就能核对完整性。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的已有 tag（如 v2.2.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 构建并发布
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: 装校验工具
+        # 打包本身由 scripts/package.py 用 Python 标准库完成（runner 自带 python3），
+        # 这里的 unzip 只用于**用另一个工具**独立复核产物结构。
+        run: sudo apt-get update && sudo apt-get install -y unzip
+
+      - name: 打包
+        run: bash scripts/package.sh
+
+      - name: 校验产物结构
+        run: |
+          set -euo pipefail
+          ZIP="$(ls dist/*.zip)"
+          echo "产物：${ZIP}"
+          unzip -Z1 "$ZIP" > entries.txt
+          head -n 1 entries.txt | grep -qx 'fanqie.koplugin/' \
+            || { echo "::error::zip 第一层必须是 fanqie.koplugin/"; exit 1; }
+          grep -qx 'fanqie.koplugin/_meta.lua' entries.txt \
+            || { echo "::error::缺少 _meta.lua"; exit 1; }
+          # 绝不能把本地配置（含登录凭据）打进发行包
+          if grep -qx 'fanqie.koplugin/config.lua' entries.txt; then
+            echo "::error::发行包里出现了 config.lua，可能有凭据泄漏"; exit 1
+          fi
+          echo "条目数：$(wc -l < entries.txt)"
+
+      - name: 核对 tag 与插件版本一致
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.tag || github.ref_name }}"
+          WANT="${REF#v}"
+          # 行首锚定：否则将来出现 min_version = "x" 时会把 min_version 当成版本号。
+          # 与 scripts/package.py 里的 read_version() 保持同一套规则。
+          GOT="$(grep -m1 -oE '^[[:space:]]*version[[:space:]]*=[[:space:]]*"[^"]+"' \
+                  src/fanqie.koplugin/fanqie/info.lua | sed -E 's/.*"([^"]+)"$/\1/')"
+          echo "tag=${WANT}  info.lua=${GOT}"
+          if [ "${WANT}" != "${GOT}" ]; then
+            echo "::error::tag 与 fanqie/info.lua 里的版本号不一致，请先统一再发版"
+            exit 1
+          fi
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist/*.zip
+            dist/*.zip.sha256
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            1. 下载下方 `fanqie.koplugin-v*.zip`
+            2. 解压后把 `fanqie.koplugin/` 整个目录放进设备的 `koreader/plugins/`
+            3. 重启 KOReader
+
+            装好后在 KOReader 的 **工具 → 番茄小说** 里配置。
+
+            ## 校验
+
+            ```sh
+            sha256sum -c fanqie.koplugin-v*.zip.sha256
+            ```
+
+            > ⚠️ 本插件使用非官方接口读取公开可读的章节内容，接口可能随时变动。
+            > 插件只做阅读端接入，不托管、不分发任何小说文本。请支持正版。

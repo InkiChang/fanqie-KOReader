@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 主用例：Linux + 原生 Lua 5.1。
+  # 这条路径最接近真实运行环境（KOReader 自己就是 Linux + LuaJIT/Lua 5.1 语义），
+  # 所以它是"权威结果"。
+  # ---------------------------------------------------------------------------
+  lua-native:
+    name: Lua 5.1 / Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Lua 5.1 与 LuaFileSystem
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 luarocks
+          # 基座优先用原生 lfs，找不到才退到 Python 桥接；原生这条路必须先装好，
+          # 否则 lua5.1 tests/run.lua 会以"找不到 LuaFileSystem"直接失败。
+          sudo luarocks --lua-version=5.1 install luafilesystem
+
+      - name: 依赖自检
+        # 不把"装没装上"留给后面那条测试命令去猜：这里直接打印，装错了立刻可见。
+        run: |
+          lua5.1 -v
+          lua5.1 -e 'local v = require("lfs")._VERSION; print("lfs = " .. tostring(v))'
+
+      - name: 跑用例
+        run: lua5.1 tests/run.lua
+
+  # ---------------------------------------------------------------------------
+  # 交叉验证：Windows + lupa（把 LuaJIT 2.1 嵌进 Python）。
+  # 这条路径的意义是证明"没有原生 Lua 的机器也能开发"，与上一条互为冗余——
+  # 两条都跑，才能保证 tests/ 里的跨平台抹平逻辑真的生效。
+  # ---------------------------------------------------------------------------
+  windows-lupa:
+    name: LuaJIT 2.1 / Windows (lupa)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 lupa
+        run: pip install lupa
+
+      - name: 跑用例
+        run: python tests/run_tests.py
+
+  # ---------------------------------------------------------------------------
+  # 打包产物自检：插件必须是 zip 里的顶层目录 fanqie.koplugin/，
+  # 否则用户解压进 koreader/plugins/ 之后 KOReader 认不出来。
+  # ---------------------------------------------------------------------------
+  package:
+    name: 打包产物检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建 zip
+        run: bash scripts/package.sh
+
+      - name: 校验 zip 结构
+        run: |
+          set -euo pipefail
+          zipinfo -1 dist/*.zip > "$RUNNER_TEMP/entries.txt"
+          cat "$RUNNER_TEMP/entries.txt"
+          head -n 1 "$RUNNER_TEMP/entries.txt" | grep -qx 'fanqie.koplugin/' \
+            || { echo "::error::zip 第一层必须是 fanqie.koplugin/"; exit 1; }
+          grep -qx 'fanqie.koplugin/_meta.lua' "$RUNNER_TEMP/entries.txt" \
+            || { echo "::error::缺少 _meta.lua，KOReader 无法识别插件"; exit 1; }
+          grep -qx 'fanqie.koplugin/main.lua' "$RUNNER_TEMP/entries.txt" \
+            || { echo "::error::缺少 main.lua"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fanqie.koplugin-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 静态检查：故意不阻塞。上游代码的基线尚未清理干净，先如实暴露问题，
+  # 清理进度记在 docs/ROADMAP.md 里，清完之后再把 continue-on-error 去掉。
+  # ---------------------------------------------------------------------------
+  luacheck:
+    name: luacheck（暂不阻塞）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 luarocks
+          sudo luarocks --lua-version=5.1 install luacheck
+
+      - name: 检查
+        run: luacheck .

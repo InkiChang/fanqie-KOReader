@@ -1,0 +1,16 @@
+# 注意：本文件里的 OWNER 是占位符。
+# 首次推送到 GitHub 后，把 OWNER 全部替换成实际的账号/组织名：
+#   grep -rl 'OWNER/fanqie-KOReader' .github docs *.md | xargs sed -i 's|OWNER|你的账号|g'
+# （Windows 上用 PowerShell 手动替换也可以，涉及文件很少。）
+
+blank_issues_enabled: false
+contact_links:
+  - name: 接口失效（403 / 空内容 / 超时）
+    url: https://github.com/OWNER/fanqie-KOReader/discussions
+    about: 插件走的是非官方接口，失效属常态。先到讨论区看看是否已有人反馈。
+  - name: 安全漏洞
+    url: https://github.com/OWNER/fanqie-KOReader/security/advisories/new
+    about: 请勿公开提交，使用私有漏洞报告。
+  - name: 安装、跑测试、搭本地验证环境
+    url: https://github.com/OWNER/fanqie-KOReader/blob/main/docs/TESTING.md
+    about: 相关文档在这里。

@@ -1,0 +1,20 @@
+# Local config with real Cookie - keep config.example.lua in VCS, ignore config.lua
+config.lua
+
+# Architecture design doc - internal reference, not distributed
+ARCHITECTURE.md
+
+# KOReader / Lua runtime artifacts
+*.luac
+/.cache/
+/.specs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files - not included in release
+tests/
+
+# Release package - distributed via GitHub Releases, not tracked in VCS
+fanqie.koplugin.zip
