@@ -1291,7 +1291,7 @@ function Content.fetch_chapter_content(client, settings, book, chapter, opts)
             -- 点开通话时再按 id 精确取（`insert_comment_ids`）—— 这样一章**零额外请求**。
             for i = 1, #want do
                 local w = want[i]
-                idea_reviews[w.idx] = { ids = w.ids or {}, n = w.n, item_id = tostring(item_id) }
+                idea_reviews[#idea_reviews + 1] = { paragraph_index = w.idx, count = tonumber(w.n) or 0, n = tonumber(w.n) or 0, ids = w.ids or {}, item_id = tostring(item_id) }
             end
             -- 直接把段评塞进全局状态：弹窗（patches/core.lua 的 fanqie-para 拦截）读的是
             -- `_state.getCurrentParaReviews()[序号]`。走返回值那条路要穿过
@@ -1531,7 +1531,7 @@ a.para-comment {
 }
 ]]
     local assets = {}
-    local cache = settings:get("cache", {})
+    local cache = settings:get("cache")
     local img_elapsed = 0
     -- Match menu semantics: download unless explicitly disabled (nil/true → download)
     if cache.download_book_images ~= false then
@@ -1558,7 +1558,7 @@ a.para-comment {
     book.reader_url = book.reader_url or FanQie.reader_url(chapter.itemId)
     
     -- 存储段评数据到缓存
-    if para_reviews and #para_reviews > 0 then
+    if type(para_reviews) == "table" and next(para_reviews) ~= nil then
         Content.save_para_reviews_index(settings, book_id, item_id, para_reviews)
     end
 
@@ -1592,10 +1592,20 @@ function Content.save_para_reviews_index(settings, book_id, item_id, para_review
     H.make_dir(dir)
     local index_path = H.join_path(dir, "para_reviews_" .. tostring(item_id) .. ".lua")
     local parts = { "return {" }
-    for i, pr in ipairs(para_reviews or {}) do
-        if pr.ident and pr.count then
-            table.insert(parts, string.format('  { ident = "%s", count = %d },', 
-                tostring(pr.ident):gsub('"', '\\"'), pr.count))
+    for key, pr in pairs(para_reviews or {}) do
+        if type(pr) == "table" and (pr.ident or pr.count or pr.n) then
+            local slot = tonumber(key) or 0
+            local paragraph_index = tonumber(pr.paragraph_index or pr.para_index or key) or slot
+            local ident = tostring(pr.ident or ""):gsub('"', '\\"')
+            local count = tonumber(pr.count or pr.n) or 0
+            local item_id = tostring(pr.item_id or ""):gsub('"', '\\"')
+            local ids = "{}"
+            if type(pr.ids) == "table" then
+                local quoted = {}
+                for _, id in ipairs(pr.ids) do quoted[#quoted + 1] = '"' .. tostring(id):gsub('"', '\\"') .. '"' end
+                ids = "{" .. table.concat(quoted, ",") .. "}"
+            end
+            table.insert(parts, string.format('  [%d] = { paragraph_index = %d, ident = "%s", count = %d, item_id = "%s", ids = %s },', slot, paragraph_index, ident, count, item_id, ids))
         end
     end
     table.insert(parts, "}")
@@ -1612,6 +1622,18 @@ function Content.load_para_reviews_index(settings, book_id, item_id)
     if not ok or type(data) ~= "table" then
         return {}
     end
+    local keys = {}
+    for key, value in pairs(data) do
+        if type(key) == "number" and type(value) == "table" then keys[#keys + 1] = key end
+    end
+    table.sort(keys)
+    local normalized = {}
+    for _, key in ipairs(keys) do
+        local value = data[key]
+        value.paragraph_index = tonumber(value.paragraph_index or value.para_index or key) or key
+        normalized[#normalized + 1] = value
+    end
+    if #normalized > 0 then return normalized end
     return data
 end
 

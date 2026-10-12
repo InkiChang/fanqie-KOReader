@@ -38,7 +38,7 @@ REQUIRED = [f"{ARCHIVE_ROOT}/_meta.lua", f"{ARCHIVE_ROOT}/main.lua"]
 #   *.zip        误放进源码目录的历史产物
 #   .DS_Store/.git/__pycache__  编辑器与版本控制残渣
 EXCLUDE_SUFFIXES = {".luac", ".zip"}
-EXCLUDE_NAMES = {"config.lua", "config.local.lua", ".DS_Store"}
+EXCLUDE_NAMES = {"config.lua", "config.local.lua", "fanqie_device.json", ".DS_Store"}
 EXCLUDE_DIRS = {".git", "__pycache__", ".pytest_cache", "node_modules"}
 
 # 固定时间戳 → 同样的输入产出同样的字节（可复现构建）
@@ -137,6 +137,10 @@ def self_check(zip_path: pathlib.Path) -> list[str]:
         for name in names:
             if name.endswith("config.lua") or name.endswith("config.local.lua"):
                 problems.append(f"发行包里混进了本地配置：{name}")
+            if pathlib.PurePosixPath(name).name in EXCLUDE_NAMES:
+                problems.append(f"发行包里混进了运行时敏感或本地文件：{name}")
+            if pathlib.PurePosixPath(name).suffix in EXCLUDE_SUFFIXES:
+                problems.append(f"发行包里混进了编译产物或历史压缩包：{name}")
 
         # CRC 校验：让"解压出来是坏的"在这里就暴露
         bad = zf.testzip()

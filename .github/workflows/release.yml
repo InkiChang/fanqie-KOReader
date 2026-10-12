@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag（形如 v2.2.0）时自动构建并发布可安装的插件包。
+# 打 tag（形如 v0.0.2）时自动构建并发布可安装的插件包。
 # 发布物只有两样：zip 本体和它的 sha256 —— 用户拿到就能核对完整性。
 
 on:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要发布的已有 tag（如 v2.2.0）"
+        description: "要发布的已有 tag（如 v0.0.2）"
         required: true
         type: string
 
@@ -44,9 +44,17 @@ jobs:
             || { echo "::error::zip 第一层必须是 fanqie.koplugin/"; exit 1; }
           grep -qx 'fanqie.koplugin/_meta.lua' entries.txt \
             || { echo "::error::缺少 _meta.lua"; exit 1; }
-          # 绝不能把本地配置（含登录凭据）打进发行包
+          # 绝不能把本地配置、设备身份或编译产物打进发行包
           if grep -qx 'fanqie.koplugin/config.lua' entries.txt; then
             echo "::error::发行包里出现了 config.lua，可能有凭据泄漏"; exit 1
+          fi
+          for forbidden in config.local.lua fanqie_device.json; do
+            if grep -q "fanqie.koplugin/${forbidden}$" entries.txt; then
+              echo "::error::发行包里出现了 ${forbidden}"; exit 1
+            fi
+          done
+          if grep -qE '\.luac$|\.DS_Store$' entries.txt; then
+            echo "::error::发行包里出现了编译产物或系统文件"; exit 1
           fi
           echo "条目数：$(wc -l < entries.txt)"
 

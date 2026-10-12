@@ -25,11 +25,13 @@ local cm = require("fanqie.cm")          -- 借它的 base64_decode
 
 local M = {}
 
+local ok_logger, logger = pcall(require, "fanqie.logger")
+if not ok_logger then logger = nil end
 M.TT_FIXED_STRING_B64 = "TdTC5rgxYgkOUrPHpnM7pByyRiuCmrWKGWs521cXdST0m69/COjWjSanLjfBqVovHwWlGJKu8pSXMrYqOKrdWA=="
 M.TT_MAGIC = string.char(0x74, 0x63, 0x05, 0x10, 0x00, 0x00)
 M.REGISTER_HOST = "https://log.snssdk.com"
 M.REGISTER_PATH = "/service/2/device_register/"
-M.USER_AGENT = "com.dragon.read/68132 (Linux; U; Android 10; zh_CN; Pixel 6; Build/QP1A.191005.007;tt-ok/3.12.13.4-tiktok)"
+M.USER_AGENT = "com.dragon.read/65132 (Linux; U; Android 10; zh_CN; MI 12; Build/MMB29M; Cronet/TTNetVersion:9ac8d95c 2024-11-25 QuicVersion:3f326df4 2024-11-14)"
 M.INSTALL_ID_URL = "https://log.snssdk.com/service/2/device_register/?"
 
 local function pkcs7(data)
@@ -53,6 +55,7 @@ end
 --- HTTP 400（实测收到的是一张 249 字节的 HTML 错误页，首字节 `<!DOCTYP`）。
 local function url_escape(s)
     return (tostring(s):gsub("[^%w%-%._~]", function(c)
+        if c == " " then return "+" end
         return string.format("%%%02X", string.byte(c))
     end))
 end
@@ -63,82 +66,126 @@ local function is_valid_id(v)
     return v ~= nil and v ~= "" and v ~= "0"
 end
 
+local function find_valid_id(value, names, depth)
+    if depth > 6 or type(value) ~= "table" then return nil end
+    for _, name in ipairs(names) do
+        local candidate = value[name]
+        if candidate ~= nil and is_valid_id(tostring(candidate)) then
+            return tostring(candidate)
+        end
+    end
+    for _, child in pairs(value) do
+        local found = find_valid_id(child, names, depth + 1)
+        if found then return found end
+    end
+    return nil
+end
+
 --- 备用画像池（换一套再注册，实测能拿到真身份）
 local PROFILES = {
-    { device_model = "Pixel 6", device_brand = "realme", os_version = "10",
-      resolution = "1080x2400", rom = "QP1A.191005.007" },
-    { device_model = "SM-G9810", device_brand = "samsung", os_version = "11",
-      resolution = "1080x2400", rom = "RP1A.200720.012" },
-    { device_model = "V2049A", device_brand = "vivo", os_version = "12",
-      resolution = "1080x2376", rom = "SP1A.210812.003" },
-    { device_model = "M2104K10AC", device_brand = "Xiaomi", os_version = "12",
-      resolution = "1080x2400", rom = "SKQ1.211006.001" },
+    { device_model = "MI 12", device_brand = "Xiaomi", os_version = "10",
+      resolution = "1440x2392", os_api = "29", dpi = "560" },
+    { device_model = "MI 11", device_brand = "Xiaomi", os_version = "11",
+      resolution = "1440x2392", os_api = "30", dpi = "560" },
+    { device_model = "Redmi K40", device_brand = "Xiaomi", os_version = "12",
+      resolution = "1080x2400", os_api = "31", dpi = "440" },
+    { device_model = "Honor10", device_brand = "honor", os_version = "9",
+      resolution = "1080x1920", os_api = "28", dpi = "420" }
 }
 
 local function rand_alnum(n)
     local chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    -- generated from OS entropy; this remains an Android identity.
+    local raw = SC.random_bytes(n)
     local out = {}
     for i = 1, n do
-        out[i] = chars:sub(math.random(1, #chars), math.random(1, #chars))
+        out[i] = chars:sub((string.byte(raw, i) % #chars) + 1, (string.byte(raw, i) % #chars) + 1)
+    end
+    return table.concat(out)
+end
+
+local function rand_hex_lower(n)
+    local hex = "0123456789abcdef"
+    local raw = SC.random_bytes(n)
+    local out = {}
+    for i = 1, n do
+        local pos = (string.byte(raw, i) % #hex) + 1
+        out[i] = hex:sub(pos, pos)
     end
     return table.concat(out)
 end
 
 local function rand_mac()
     local HEX = "0123456789ABCDEF"
+    local raw = SC.random_bytes(12)
     local out = {}
-    for i = 1, 12 do out[i] = HEX:sub(math.random(1, 16), math.random(1, 16)) end
+    for i = 1, 12 do
+        local pos = (string.byte(raw, i) % #HEX) + 1
+        out[i] = HEX:sub(pos, pos)
+    end
     return table.concat(out)
 end
 
 local function uuid4()
     local HEX = "0123456789abcdef"
+    local raw = SC.random_bytes(32)
     local out = {}
-    for i = 1, 32 do out[i] = HEX:sub(math.random(1, 16), math.random(1, 16)) end
+    for i = 1, 32 do
+        local pos = (string.byte(raw, i) % #HEX) + 1
+        out[i] = HEX:sub(pos, pos)
+    end
     local s = table.concat(out)
     return s:sub(1, 8) .. "-" .. s:sub(9, 12) .. "-4" .. s:sub(14, 16) .. "-a"
         .. s:sub(18, 20) .. "-" .. s:sub(21, 32)
 end
 
+local function build_user_agent(opts)
+    return string.format(
+        "com.dragon.read/%s (Linux; U; Android %s; zh_CN; %s; Build/MMB29M; Cronet/TTNetVersion:9ac8d95c 2024-11-25 QuicVersion:3f326df4 2024-11-14)",
+        tostring(opts.version_code or 65132), tostring(opts.os_version or "10"),
+        tostring(opts.device_model or "MI 12"))
+end
 --- 组装注册请求体（未压缩的 JSON 字符串）
 function M.build_json(opts)
     opts = opts or {}
-    local now_ms = math.floor(os.time()) * 1000
+    local now_ms = math.floor(os.time() * 1000)
     local header = {
         display_name = "番茄小说",
-        update_version_code = opts.update_version_code or "68132",
-        manifest_version_code = opts.version_code or 68132,
+        update_version_code = opts.update_version_code or "65132",
+        -- Android registration profile follows fqapp's 6.5.1.32 schema.
+        manifest_version_code = tostring(opts.version_code or 65132),
+        -- Keep the same Android schema and field shapes as fqapp.
         aid = 1967,
-        channel = opts.channel or "xiaomi_8993_64",
+        channel = opts.channel or "xiaomi_1967_64",
         package = opts.package or "com.dragon.read",
-        app_version = opts.version_name or "6.8.1.32",
-        version_code = opts.version_code or 68132,
-        sdk_version = opts.sdk_version or "2.16.4",
+        app_version = opts.version_name or "6.5.1.32",
+        version_code = tostring(opts.version_code or 65132),
+        sdk_version = opts.sdk_version or "v04.04.05-ov-android",
         sdk_target_version = 29,
         os = "Android",
         os_version = opts.os_version or "10",
-        os_api = 29,
-        device_model = opts.device_model or "Pixel 6",
-        device_brand = opts.device_brand or "realme",
+        os_api = tostring(opts.os_api or "29"),
+        device_model = opts.device_model or "MI 12",
+        device_brand = opts.device_brand or "Xiaomi",
         device_manufacturer = "Google",
         device_category = "phone",
         cpu_abi = "arm64-v8a",
-        release_build = uuid4(),
-        density_dpi = 420,
+        release_build = opts.release_build or uuid4(),
+        density_dpi = tostring(opts.dpi or "560"),
         display_density = "mdpi",
-        resolution = opts.resolution or "1080x2400",
+        resolution = opts.resolution or "1440x2392",
         language = "zh",
-        mac = rand_mac(),
+        mac = opts.mac or rand_mac(),
         timezone = 8,
         access = "wifi",
         not_request_sender = 0,
         carrier = "CHINA MOBILE",
         mcc_mnc = "46007",
-        rom = opts.rom or "QP1A.191005.007",
-        rom_version = opts.rom_version or "release-keys",
+        rom = opts.rom or ("EMUI-" .. rand_alnum(13)),
+        rom_version = opts.rom_version or rand_alnum(2),
         sig_hash = SC.md5_hex(uuid4()),
-        openudid = rand_alnum(16),
-        clientudid = uuid4(),
+        openudid = opts.openudid or rand_alnum(16),
+        clientudid = opts.clientudid or uuid4(),
         sim_serial_number = {},
         region = "CN",
         tz_name = "Asia/Shanghai",
@@ -158,27 +205,51 @@ end
 --- 注册一次，返回 install_id, device_id, err
 function M.register(opts)
     opts = opts or {}
-    math.randomseed(os.time() + (os.clock() * 1000000) % 1000000)
+    -- Android-only registration: Kindle hardware is never consulted.
+    -- Identity fields below are generated from OS entropy; Kindle hardware is never read.
+    -- fqapp uses a 16-character lowercase hexadecimal OpenUDID.
+    local openudid = opts.openudid or rand_hex_lower(16)
+    local clientudid = opts.clientudid or uuid4()
 
+    opts.openudid = openudid
+    opts.clientudid = clientudid
+    opts.cdid = opts.cdid or uuid4()
+    opts.rom = opts.rom or ("EMUI-" .. rand_alnum(13))
+    opts.rom_version = opts.rom_version or rand_alnum(2)
+    opts.release_build = opts.release_build or uuid4()
+    opts.mac = opts.mac or rand_mac()
     local body_json = M.build_json(opts)
-    local payload = M.tt_encrypt(gzip.encode(body_json), opts.random32)
+    local compressed = gzip.encode(body_json)
+    local payload = M.tt_encrypt(compressed, opts.random32)
 
-    local query = table.concat({
-        "aid=1967", "app_name=novelapp", "channel=" .. url_escape(opts.channel or "xiaomi_8993_64"),
-        "device_platform=android", "device_type=" .. url_escape(opts.device_model or "Pixel 6"),
-        "os_version=" .. url_escape(opts.os_version or "10"), "tt_data=a",
-        "version_code=" .. tostring(opts.version_code or 68132),
-        "version_name=" .. url_escape(opts.version_name or "6.8.1.32"),
-    }, "&")
+    local query_params = {
+        aid="1967", app_name="novel", channel=opts.channel or "xiaomi_1967_64",
+        device_platform="android", device_type=opts.device_model or "MI 12", os_version=opts.os_version or "10",
+        version_code=tostring(opts.version_code or 65132), version_name=opts.version_name or "6.5.1.32", tt_data="a",
+        update_version_code=tostring(opts.update_version_code or opts.version_code or 65132),
+        os_api=tostring(opts.os_api or "29"), ssmix="a", manifest_version_code=tostring(opts.version_code or 65132), dpi=tostring(opts.dpi or "560"),
+        ts=tostring(os.time()), _rticket=tostring(math.floor(os.time() * 1000)), cpu_support64="true", app_type="normal",
+        appTheme="light", ac="wifi", host_abi="arm64-v8a", device_brand=opts.device_brand or "Xiaomi", os="android",
+        minor_status="0",
+        is_android_pad="0", package="com.dragon.read", resolution=(opts.resolution or "1440x2392"):gsub("x", "*"), language="zh", need_personal_recommend="1",
+        mcc_mnc="46007", openudid=openudid, cdid=opts.cdid,
+    }
+    local query_keys, query_parts = {}, {}
+    for k in pairs(query_params) do query_keys[#query_keys + 1] = k end
+    table.sort(query_keys)
+    for _, k in ipairs(query_keys) do query_parts[#query_parts + 1] = url_escape(k) .. "=" .. url_escape(query_params[k]) end
+    local query = table.concat(query_parts, "&")
 
     local url = M.REGISTER_HOST .. M.REGISTER_PATH .. "?" .. query
     local headers = {
         ["content-type"] = "application/octet-stream;tt-data=a",
+        -- LuaSocket may otherwise choose chunked transfer; the Android client sends a fixed length.
+        ["content-length"] = tostring(#payload),
         -- 上游规格里写的是 "gzip"，但那会让响应也变成 gzip，而 KOReader 上没有 zlib，
         -- 于是 `json.decode` 直接失败（真机实测报「注册响应不是合法 JSON」）。
         -- 改成 identity 直接要明文；正文接口（full/mget）也是这么干的，同样能过。
-        ["accept-encoding"] = "identity",
-        ["user-agent"] = M.USER_AGENT,
+        ["accept-encoding"] = "gzip",
+        ["user-agent"] = build_user_agent(opts),
         ["host"] = "log.snssdk.com",
         ["connection"] = "Keep-Alive",
     }
@@ -188,7 +259,7 @@ function M.register(opts)
     if not (okh and okl) then return nil, nil, "缺少 ssl.https / ltn12" end
 
     local chunks = {}
-    local ok, code = https.request({
+    local ok, code, response_headers = https.request({
         url = url, method = "POST", headers = headers,
         source = ltn12.source.string(payload), sink = ltn12.sink.table(chunks),
     })
@@ -197,7 +268,10 @@ function M.register(opts)
         return nil, nil, string.format("注册响应为空（ok=%s code=%s）", tostring(ok), tostring(code))
     end
     if raw:sub(1, 2) == "\31\139" then
-        return nil, nil, "注册响应是 gzip（本模块未解压；应让请求不要带 accept-encoding: gzip）"
+        local ok_gz, decoded = pcall(gzip.decode, raw)
+        if ok_gz and decoded then raw = decoded else
+            return nil, nil, "注册响应是 gzip 且解压失败：" .. tostring(decoded)
+        end
     end
 
     local okj, json = pcall(require, "json")
@@ -216,7 +290,7 @@ function M.register(opts)
         return nil, nil, string.format(
             "注册响应不是合法 JSON（code=%s len=%d 首字节=%s content-type=%s）",
             tostring(code), #raw, hexhead(8),
-            tostring(headers and headers["content-type"]))
+            tostring(response_headers and (response_headers["content-type"] or response_headers["Content-Type"])))
     end
 
     local function pick(t, k)
@@ -231,10 +305,30 @@ function M.register(opts)
         iid = iid or pick(data, "install_id") or pick(data, "install_id_str")
         did = did or pick(data, "device_id") or pick(data, "device_id_str")
     end
+    -- Some responses include numeric install_id/device_id=0 at the top level
+    -- and the real *_str values inside data. A Lua string "0" is truthy, so
+    -- plain `or` selection would incorrectly discard the valid nested IDs.
+    local function first_valid(...)
+        for i = 1, select("#", ...) do
+            local value = select(i, ...)
+            if is_valid_id(value) then return value end
+        end
+        return nil
+    end
+    local root_iid = first_valid(pick(root, "install_id_str"), pick(root, "install_id"))
+    local root_did = first_valid(pick(root, "device_id_str"), pick(root, "device_id"))
+    local data_iid, data_did
+    if type(data) == "table" then
+        data_iid = first_valid(pick(data, "install_id_str"), pick(data, "install_id"))
+        data_did = first_valid(pick(data, "device_id_str"), pick(data, "device_id"))
+    end
+    iid, did = data_iid or root_iid, data_did or root_did
+    iid = find_valid_id(root, { "install_id_str", "install_id" }, 0) or iid
+    did = find_valid_id(root, { "device_id_str", "device_id" }, 0) or did
     if not is_valid_id(iid) or not is_valid_id(did) then
         return nil, nil, string.format(
-            "注册被去重/限流（install_id=%s device_id=%s）——需换随机画像重试",
-            tostring(iid), tostring(did))
+            "注册返回无有效 Android 身份（HTTP=%s install_id=%s device_id=%s raw=%s）",
+            tostring(code), tostring(iid), tostring(did), tostring(raw):sub(1, 180):gsub("[%c]", " "))
     end
     return iid, did
 end
@@ -250,7 +344,8 @@ function M.ensure_identity(data_dir, opts)
         if ok then
             local okd, d = pcall(json.decode, raw)
             if okd and type(d) == "table" and d.install_id and d.device_id
-                and tostring(d.install_id) ~= "" and tostring(d.device_id) ~= "" then
+                and tostring(d.install_id) ~= "" and tostring(d.install_id) ~= "0"
+                and tostring(d.device_id) ~= "" and tostring(d.device_id) ~= "0" then
                 return { install_id = tostring(d.install_id), device_id = tostring(d.device_id) }
             end
         end

@@ -42,11 +42,10 @@ body:
       label: 使用的数据源
       description: 不同数据源的故障原因完全不同，这一项很关键。
       options:
-        - 番茄官方（移动端）
-        - 番茄官方（网页端）
-        - 晴天书源
-        - 大灰狼书源
-        - 不确定 / 自动切换
+        - 官方 App 源
+        - 番茄 API 备用源
+        - 官方 App → API 自动 fallback
+        - 不确定
     validations:
       required: true
 

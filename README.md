@@ -1,107 +1,78 @@
-# 番茄小说 KOReader 插件
+# fanqie-KOReader
 
-在 **KOReader** 里阅读**番茄小说**：扫码登录、书架同步、逐章阅读、阅读进度回传，全部在设备本地完成。
+KOReader 插件，用于在 Kindle 等电纸书设备上阅读番茄小说。
 
-> 目标设备是**越狱 Kindle**。插件为**纯 Lua**，只依赖 KOReader 自带模块，不需要电脑中转、也不需要另外运行桌面程序。
+当前插件版本：`0.0.2`
 
----
+## 当前正文源
 
-## 功能
+运行时只有两个正文源，并按优先级自动 fallback：
 
-| 功能 | 说明 |
-|---|---|
-| **扫码登录** | 插件内直接显示二维码，用番茄小说 App 扫码登录，登录态保存在本机 |
-| **书架** | 读取账号书架，显示书籍、封面与阅读进度 |
-| **阅读** | 逐章取回正文并缓存（内存 + 磁盘两层），支持翻章与进度回传 |
-| **段评** | 正文段落末尾显示段评条数气泡，点开查看该段真实评论（正文 / 用户名 / 点赞数） |
-| **预下载** | 读到某章时后台预下后续 N 章（1 / 3 / 5 / 10 可选），切章不再等待 |
-| **进度同步** | 阅读进度回传服务器，与 App 保持一致 |
-| **墨水屏适配** | 黑白显示、翻页无闪烁，字号行距跟随 KOReader 全局设置 |
+1. **官方 App 源（`official_app`）**：使用番茄移动端接口获取正文和段评，请求身份模拟为 Android 设备。
+2. **番茄 API 备用源（`official_proxy`）**：官方 App 源失败时自动接管正文请求。
 
-## 环境要求
+网页正文源已移除，因为无法稳定返回完整章节内容。两个源默认都启用，不需要用户手动切换。
 
-- KOReader（较新版本即可，插件只使用其内置模块）
-- 一台越狱的 Kindle；或 Android / Linux 上的 KOReader（用于调试）
-- 网络：可访问番茄小说的接口
+## 主要功能
+
+- 扫码登录、书架同步、目录和阅读进度同步
+- 官方 App 源优先、番茄 API 自动 fallback
+- 章节缓存、离线阅读和 3/5/10 章预下载设置
+- 段评气泡、段评详情和真实段落索引
+- 适配 Kindle 墨水屏的逐章阅读界面
 
 ## 安装
 
-1. 把整个 `fanqie.koplugin` 目录拷贝到 KOReader 的插件目录：
+1. 从 GitHub Releases 下载 `fanqie.koplugin-v*.zip`，或运行 `python scripts/package.py` 自行生成。
+2. 解压后，将压缩包内的 `fanqie.koplugin/` 整个目录放入 KOReader 的 `plugins/` 目录。
+3. 重启 KOReader，在工具菜单中打开「番茄小说」。
 
-   | 平台 | 插件目录 |
-   |---|---|
-   | Kindle / 多数设备 | `<KOReader 数据目录>/plugins/` |
-   | Android | `/storage/emulated/0/koreader/plugins/` |
+最终路径应为：
 
-   最终结构应为 `<插件目录>/fanqie.koplugin/main.lua`。
-
-2. 重启 KOReader。
-3. 在 KOReader 的**文件浏览器 → 工具菜单**里找到「番茄小说」并启用。
-4. 首次使用选择「扫码登录」，用番茄小说 App 扫描屏幕上的二维码。
-
-> 登录凭据只保存在**本机**配置里。请勿把配置文件提交到仓库，也不要贴进公开日志。
-
-## 配置
-
-插件使用 KOReader 的配置机制保存设置（字段说明见 `src/fanqie.koplugin/config.example.lua`）。
-常用可调项：
-
-- `cookies.ttwid` / `cookies.sessionid`：按 Cookie 名分别填写（通常由扫码登录自动写入）
-- `cache.pre_download_chapters`：预下载章节数（1 / 3 / 5 / 10）
-- `para_review_enabled`：段评开关
-- `advanced.developer_logs`：开发者日志（排查问题时打开）
-
-**安全提示**：含真实 Cookie / Token 的配置文件已在 `.gitignore` 中排除，请勿强制提交。
-
-## 目录结构
-
-```
-src/fanqie.koplugin/     插件本体（KOReader 直接加载）
-  main.lua               入口、菜单、阅读流程
-  fanqie/                取文、登录、签名、缓存、段评等模块
-  patches/               对 KOReader 的最小猴补丁
-tests/                   测试（向量与集成用例）
-scripts/                 向量生成、打包等开发脚本
-tools/                   辅助工具
-docs/                    接口与架构说明
+```text
+<KOReader 数据目录>/plugins/fanqie.koplugin/main.lua
 ```
 
-## 开发与测试
+首次使用通过插件内的扫码登录获取账号状态。官方 App 源会在运行时读取或生成 Android 设备身份；不会使用 Kindle 型号、序列号等硬件信息。
+
+插件源码位于 [`src/fanqie.koplugin/`](src/fanqie.koplugin/)，详细安装、运行时文件、设备身份、段评、缓存和上游参考说明见 [`src/fanqie.koplugin/README.md`](src/fanqie.koplugin/README.md)。
+
+## 开发
 
 ```bash
-# 运行全部测试（需要 Python 3 与 lupa）
-python tests/run_tests.py
-
-# 打包插件目录
-make package
+python3 scripts/package.py
 ```
 
-当前状态：**68 通过 / 0 失败**（签名向量、密钥交换、接口契约与正文清洗）。
+发布包会写入 `dist/`，并排除 `config.lua`、`config.local.lua`、`fanqie_device.json`、Cookie、Token、日志、缓存、`.DS_Store` 和 `.luac`。
 
-## 免责声明
+测试需要 Python 依赖 `lupa` 或原生 Lua 5.1/LuaJIT：
 
-- 本项目仅供**个人学习与自用**，用于在自己的设备上访问自己账号的内容；
-- 项目**不提供、不分发**任何小说内容，内容均实时来自官方接口；
-- 请遵守番茄小说的用户协议，并**支持正版阅读**；
-- 使用本插件产生的任何后果由使用者自行承担。
+```bash
+# 没有 lupa 时，先准备仓库外的本地测试依赖
+python3 scripts/bootstrap_pylibs.py
+python3 tests/run_tests.py
+```
 
-## 致谢
+KOReader 真机上的扫码登录、正文 fallback、预下载和段评仍需在 Kindle/Android 设备上验收。
 
-插件的关键部分——尤其是**签名算法、密钥交换与接口协议**——能够与官方实现对齐，
-离不开下面这些公开项目的启发与交叉验证。它们**仅作为协议与接口规格的参考**，
-本项目**没有复制其代码**：
+## 安全提示
 
-- **[fqapp](https://github.com/ch6vip/fqapp)** —— 接口路径、参数组合与协议行为的可靠参照
-  （例如评论接口的 `business_param` 结构与参数组）；本项目按其公开规格自行实现；
-- **[Fanqie-novel-Downloader](https://github.com/POf-L/Fanqie-novel-Downloader)** ——
-  在接口常量与字段命名上提供了旁证；
-- **[kindle-forge](https://github.com/ch6vip/kindle-forge)** —— 段评气泡的
-  **全局占位符替换方案**参考自该项目；
-- **[KOReader](https://github.com/koreader/koreader)** —— 本插件运行于其上，
-  猴补丁与事件机制均依赖其稳定接口。
+`config.lua`、`fanqie_device.json`、Cookie、Token、日志和缓存都是运行时数据，不应提交到公开仓库。
 
-也感谢所有在签名、加密与请求协议上公开过分析与讨论的人。
+## 许可证
 
-## 许可
+MIT License。第三方参考项目和归属说明见 [`NOTICE.md`](NOTICE.md)。
 
-见 [LICENSE](LICENSE)；第三方项目的署名与许可说明见 [NOTICE.md](NOTICE.md)。
+## 致谢与参考项目
+
+本项目参考了以下开源项目的插件骨架、接口分析、正文解析和 Android 调用链研究；它们不是本插件的运行时依赖，本项目使用独立的 Lua 实现。
+
+- [hesan1232/fanqie.koplugin](https://github.com/hesan1232/fanqie.koplugin)：KOReader 插件骨架与界面流程。
+- [ch6vip/fqapp](https://github.com/ch6vip/fqapp)：番茄 App 设备注册、正文接口和解密流程。
+- [POf-L/Fanqie-novel-Downloader](https://github.com/POf-L/Fanqie-novel-Downloader)：移动端正文接口和客户端行为。
+- [qianbkk/fanqie-novel-bypass](https://github.com/qianbkk/fanqie-novel-bypass)：正文接口和网页内容完整性验证。
+- [zwb8926/fanqie-novel-vscode](https://github.com/zwb8926/fanqie-novel-vscode)、[fysh1010/mcp-server-fanqie](https://github.com/fysh1010/mcp-server-fanqie)、[qinggudao-yang/fanqie-harvest](https://github.com/qinggudao-yang/fanqie-harvest)：章节字段、正文解析和备用接口。
+- [zhongbai2333/Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader)、[ZfxZephyr/Fanqie-novel-Downloader-CSharp-Rebuild](https://github.com/ZfxZephyr/Fanqie-novel-Downloader-CSharp-Rebuild)：正文请求和兼容处理。
+- [imengying/unidbg](https://github.com/imengying/unidbg)：Android/native 调用链和设备注册流程研究；本插件不依赖 Unidbg 后端。
+
+感谢上述项目作者公开协议分析、接口观察和实现经验。许可证和具体参考范围见 [`NOTICE.md`](NOTICE.md)。

@@ -18,3 +18,4 @@ tests/
 
 # Release package - distributed via GitHub Releases, not tracked in VCS
 fanqie.koplugin.zip
+fanqie_device.json

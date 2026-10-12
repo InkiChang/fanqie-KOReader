@@ -9,7 +9,7 @@ SPEC   ?=
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-native test-windows test-spec test-strict lint package sample verify-sample clean
+.PHONY: help test test-native test-windows test-spec test-strict lint package clean
 
 help: ## 显示本帮助
 	@echo "fanqie-KOReader —— 可用目标："
@@ -50,11 +50,6 @@ lint: ## luacheck 静态检查（基线未清，不阻塞）
 package: ## 打出可直接安装的 zip 到 dist/
 	$(PYTHON) scripts/package.py
 
-sample: ## 生成示例 EPUB（肉眼验收 EPUB 生成器）
-	$(PYTHON) tools/make_sample_epub.py --probe
-
-verify-sample: ## 独立验收 sample-book.epub（Python 标准库，非插件自身实现）
-	$(PYTHON) tools/verify_epub.py sample-book.epub --html sample-book.report.html
 
 clean: ## 清掉临时产物（不碰源码与 refs/）
 	rm -rf dist tests/.tmp tests/out

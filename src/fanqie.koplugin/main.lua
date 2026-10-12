@@ -73,12 +73,6 @@ local Patches = safe_require("patches.core")
 local Bookshelf = safe_require("fanqie.bookshelf")
 local ReaderNavigation = safe_require("fanqie.reader_navigation")
 
--- 整书 EPUB 组装（第一阶段）：把已缓存的若干章合成一个文档。
--- 可选依赖：加载失败时整书模式自动不可用，逐章 HTML 路径照旧。
--- 整书 EPUB 单文档模式**已移除**（2026-10-10 用户决定）：
--- `fanqie/book_epub.lua`、`fanqie/epub.lua` 及其用例已删除，两个入口函数改为空实现。
--- 详见 STATUS.md 与 方案-EPUB单文档方案.md（记录了当时卡在哪里）。
-
 -- 插件元信息（版本号、关于文案）：集中管理，避免多处维护不同步
 local Info = safe_require("fanqie.info")
 
@@ -164,13 +158,8 @@ local function getCachedChapters(self, book)
     return book.cached_chapters
 end
 
--- 单文档整书模式：打开的是一份组装好的 EPUB，一份文档 = 整本书。
--- 此时所有"章节级"语义（上一章/下一章、按章回传进度、预下载触发）都不成立：
--- 页面比例属于整本书，当成某一章的进度上传会把番茄的阅读进度写坏。
--- 由 showReaderUI 的第 3 个参数设置，目录里点某一章会立刻回到逐章模式。
 local function isSingleDocumentMode()
-    -- 整书 EPUB 单文档模式已移除：这里**恒为 false**（保留函数只为让既有调用点保持有效，
-    -- 它们会一律走"逐章 HTML"那条路）。要恢复该模式请先还原 book_epub.lua/epub.lua。
+    -- 当前始终逐章打开 HTML，保留该钩子以兼容旧调用点。
     return false
 end
 
@@ -413,6 +402,7 @@ end
 
 -- 显示单段段评详情（从API获取评论数据）
 function FanQiePlugin:showParaReviewDetail(index)
+    -- App-source records may carry a real paragraph index.
     local reviews = _state.getCurrentParaReviews()
     local pr = reviews[index]
     if not pr or not pr.ident then
@@ -437,9 +427,10 @@ function FanQiePlugin:showParaReviewDetail(index)
             if (not ids or #ids == 0) and type(pr) == "table" and pr.item_id
                 and self.client.official_app_get_ideas then
                 local oki, idea = pcall(self.client.official_app_get_ideas, self.client,
-                    book_id, tostring(pr.item_id), nil, index)
-                if oki and type(idea) == "table" and idea[index] and idea[index].ids then
-                    ids = idea[index].ids
+                    book_id, tostring(pr.item_id), nil, tonumber(pr.paragraph_index or pr.para_index or index))
+                local para_index = tonumber(pr.paragraph_index or pr.para_index or index) or index
+                if oki and type(idea) == "table" and idea[para_index] and idea[para_index].ids then
+                    ids = idea[para_index].ids
                     if Log then Log.info("[段评] 按段落补取 id 数:", tostring(#(ids or {}))) end
                 elseif Log then
                     Log.warn("[段评] 按段落补取 id 失败:", tostring(idea))
@@ -449,7 +440,7 @@ function FanQiePlugin:showParaReviewDetail(index)
             -- 并用章节真实 `item_version`（来自移动端目录）——见 TASK-段评接口.md 第十二节。
             local item_id = (type(pr) == "table" and tostring(pr.item_id or "")) or ""
             local ok, list = pcall(self.client.official_app_get_comment_list,
-                self.client, book_id, item_id, index, 20, ids)
+                self.client, book_id, item_id, tonumber(pr.paragraph_index or pr.para_index or index) or index, 20, ids)
             if ok and type(list) == "table" and #list > 0 then
                 local lines = {}
                 for i, c in ipairs(list) do
@@ -782,32 +773,32 @@ function FanQiePlugin:getSettingsMenuItems()
         },
         {
             text_func = function()
-                local cache = self.settings:get("cache", {})
+                local cache = self.settings:get("cache")
                 local count = cache.pre_download_chapters or 3
                 return T(_("预下载章节数: %1"), tostring(count))
             end,
             keep_menu_open = true,
             sub_item_table = {
                 { text = "1",  keep_menu_open = true, callback = function() self:setPreDownloadCount(1) end,
-                    checked_func = function() local c = self.settings:get("cache", {}); return (c and c.pre_download_chapters or 3) == 1 end },
+                    checked_func = function() local c = self.settings:get("cache"); return (c and c.pre_download_chapters or 3) == 1 end },
                 { text = "3",  keep_menu_open = true, callback = function() self:setPreDownloadCount(3) end,
-                    checked_func = function() local c = self.settings:get("cache", {}); return (c and c.pre_download_chapters or 3) == 3 end },
+                    checked_func = function() local c = self.settings:get("cache"); return (c and c.pre_download_chapters or 3) == 3 end },
                 { text = "5",  keep_menu_open = true, callback = function() self:setPreDownloadCount(5) end,
-                    checked_func = function() local c = self.settings:get("cache", {}); return (c and c.pre_download_chapters or 3) == 5 end },
+                    checked_func = function() local c = self.settings:get("cache"); return (c and c.pre_download_chapters or 3) == 5 end },
                 { text = "10", keep_menu_open = true, callback = function() self:setPreDownloadCount(10) end,
-                    checked_func = function() local c = self.settings:get("cache", {}); return (c and c.pre_download_chapters or 3) == 10 end },
+                    checked_func = function() local c = self.settings:get("cache"); return (c and c.pre_download_chapters or 3) == 10 end },
             },
         },
         
         {
             text = _("下载图片"),
             checked_func = function()
-                local cache = self.settings:get("cache", {})
+                local cache = self.settings:get("cache")
                 return cache.download_book_images ~= false
             end,
             keep_menu_open = true,
             callback = function()
-                local cache = self.settings:get("cache", {})
+                local cache = self.settings:get("cache")
                 cache.download_book_images = not (cache.download_book_images ~= false)
                 self.settings:set("cache", cache)
                 self.settings:flush()
@@ -1638,7 +1629,7 @@ function FanQiePlugin:getLogMenuItems()
 end
 
 function FanQiePlugin:setPreDownloadCount(n)
-    local cache = self.settings:get("cache", {})
+    local cache = self.settings:get("cache")
     cache.pre_download_chapters = n
     self.settings:set("cache", cache)
     self.settings:flush()
@@ -2819,9 +2810,15 @@ function FanQiePlugin:reloadCurrentChapter()
 end
 
 function FanQiePlugin:preDownloadChapters(book, chapters, current_index)
-    local cache = self.settings:get("cache", {})
-    local pre_download_count = cache.pre_download_chapters or 3
+    local cache = self.settings:get("cache")
+    local pre_download_count = tonumber(cache.pre_download_chapters) or 3
     local total = #chapters
+
+    if Log then
+        Log.info("pre-download config:", "count=" .. tostring(pre_download_count),
+            "current=" .. tostring(current_index), "total=" .. tostring(total),
+            "range=" .. tostring(current_index + 1) .. "-" .. tostring(math.min(current_index + pre_download_count, total)))
+    end
 
     if current_index >= total then return end
 

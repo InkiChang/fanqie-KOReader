@@ -161,8 +161,9 @@ function Client:new(settings)
     -- Source fetcher dispatch table: source_id -> function(book_id, item_id, opts).
     -- Note: qingtian_get_content takes (item_id, book_id), so we swap args.
     obj._source_fetchers = {
-        -- 只保留官方移动端源；晴天/大灰狼/Web 版官方 API 已按需求移除
+        -- The proxy source keeps device registration on the API server.
         official_app = function(bid, iid, opts) return obj:official_app_get_content(bid, iid, opts) end,
+        official_proxy = function(bid, iid, opts) return obj:official_proxy_get_content(bid, iid, opts) end,
     }
     return obj
 end
@@ -1195,6 +1196,8 @@ function Client:_official_app_identity()
     local cfg = (self.settings.get_source and self.settings:get_source("official_app")) or {}
     if did == "" then did = H.trim(cfg.device_id or "") end
     if iid == "" then iid = H.trim(cfg.install_id or "") end
+    if did == "0" then did = "" end
+    if iid == "0" then iid = "" end
 
     -- 还是缺 → **自动注册一次**（这样用户不需要手动放任何文件）
     if did == "" or iid == "" then
@@ -1616,9 +1619,19 @@ function Client:official_app_get_content(book_id, item_id)
         if not b[tostring(item_id)] then error("批量结果里没有当前章", 0) end
     end)
     if not ok then
-        -- 退回原逻辑（行为与改动前完全一致）
         self._oa_cache[key] = nil
-        return _oa_get_one(self, book_id, item_id)
+        local original_ok, original = pcall(_oa_get_one, self, book_id, item_id)
+        if original_ok and original and original.content then return original end
+        local ok_legacy, legacy = pcall(require, "fanqie.app_legacy")
+        if not ok_legacy then error(original or legacy, 0) end
+        local did, iid = self:_official_app_identity()
+        self._legacy_register_key = self._legacy_register_key
+            or legacy.fetch_register_key(self, did, iid, {})
+        local got = legacy.fetch_batch(self, book_id, { tostring(item_id) }, did, iid,
+            { register_key = self._legacy_register_key })
+        local rec = got and got[tostring(item_id)]
+        if not rec or not rec.content then error(original or "官方App正文为空", 0) end
+        return { content = rec.content, title = rec.title or "", author = "" }
     end
 
     bucket = self._oa_cache[key]
@@ -2161,7 +2174,6 @@ function Client:get_chapter_content_with_fallback(book_id, item_id, opts)
     local function log_info(...) if ok_logger and logger_mod then logger_mod.info(...) end end
     local function log_debug(...) if ok_logger and logger_mod then logger_mod.debug(...) end end
     local function log_error(...) if ok_logger and logger_mod then logger_mod.error(...) end end
-
     local SourceManager = require("fanqie.sources")
     local sources = SourceManager.get_active_sources(self.settings)
     if #sources == 0 then
@@ -2192,7 +2204,7 @@ function Client:get_chapter_content_with_fallback(book_id, item_id, opts)
                 local ok, result = pcall(fetcher, book_id, item_id, opts)
                 local elapsed = now_ms() - t_src
                 if ok and result and result.content then
-                    log_debug("[FanQie][perf] 源成功:",
+                    log_info("[FanQie][perf] 源成功:",
                         "source=" .. src.id,
                         "elapsed=" .. string.format("%.0f", elapsed) .. "ms",
                         "itemId=" .. tostring(item_id),
@@ -2223,5 +2235,93 @@ function Client:get_chapter_content_with_fallback(book_id, item_id, opts)
         "errors=" .. table.concat(errors, " | "))
     error("所有书源均失败: " .. table.concat(errors, " | "))
 end
+
+-- Third-party proxy fallback. The server owns device registration and signing; the Kindle only requests chapter text.
+function Client:official_proxy_get_content(book_id, item_id, opts)
+    local encoded_id = H.url_encode(tostring(item_id or ""))
+    local base = "http://101.35.133.34:5000"
+    local urls = {
+        base .. "/api/content?tab=%E5%B0%8F%E8%AF%B4&item_id=" .. encoded_id,
+        base .. "/api/chapter?item_id=" .. encoded_id,
+        base .. "/api/raw_full?item_id=" .. encoded_id,
+    }
+    local headers = {
+        ["User-Agent"] = FanQie.MOBILE_UA,
+        ["Accept"] = "application/json, text/plain, */*",
+        ["Accept-Encoding"] = "identity",
+    }
+    local last_err = "番茄 API 备用源无正文"
+    local ok_logger, logger_mod = pcall(require, "fanqie.logger")
+    local function log_debug(...)
+        if ok_logger and logger_mod then logger_mod.debug(...) end
+    end
+
+    local function clean_content(value)
+        if type(value) ~= "string" then return nil end
+        local content = value
+            :gsub("\\u003c", "<"):gsub("\\u003e", ">")
+            :gsub("\\u0026", "&"):gsub("\\n", "\n")
+            :gsub("\\r", "\r"):gsub("\\\"", '"')
+        content = content:gsub("<br%s*/?>", "\n"):gsub("</p>", "\n")
+            :gsub("</div%s*>", "\n"):gsub("</h[1-6]%s*>", "\n"):gsub("<[^>]*>", "")
+            :gsub("&nbsp;", " "):gsub("&amp;", "&")
+            :gsub("&lt;", "<"):gsub("&gt;", ">")
+        if #content > 20 then return content end
+        return nil
+    end
+
+    local function extract(root)
+        if type(root) ~= "table" then return nil, nil, nil end
+        local data = root.data
+        local candidates = { root.content, root.text, root.chapter_content, root.chapterContent }
+        local title, author = root.title or root.chapter_title, root.author
+        if type(data) == "string" then table.insert(candidates, 1, data) end
+        if type(data) == "table" then
+            title = title or data.title or data.chapter_title
+            author = author or data.author
+            table.insert(candidates, 1, data.content)
+            table.insert(candidates, data.text)
+            table.insert(candidates, data.chapter_content)
+            table.insert(candidates, data.chapterContent)
+            if type(data.novel_data) == "table" then
+                table.insert(candidates, data.novel_data.show_navi_cn_body)
+                table.insert(candidates, data.novel_data.showNaviCnBody)
+            end
+            if type(data.data) == "string" then table.insert(candidates, data.data) end
+        end
+        for _, value in ipairs(candidates) do
+            local content = clean_content(value)
+            if content then return content, title, author end
+        end
+        return nil, title, author
+    end
+
+    for _, url in ipairs(urls) do
+        local ok, text, code = pcall(function()
+            return self:request({ url = url, method = "GET", headers = headers, timeout = 20 })
+        end)
+        if ok and code and code >= 200 and code < 300 and text and text ~= "" then
+            log_debug("[FanQie] 备用源响应:", "url=" .. url, "code=" .. tostring(code), "body_bytes=" .. tostring(#text))
+            local decoded_ok, root = pcall(self.json_decode, self, text)
+            if decoded_ok then
+                local content, title, author = extract(root)
+                if content then
+                    return { content = content, title = title or "", author = author or "" }
+                end
+                last_err = "备用源响应未包含正文"
+            else
+                last_err = "备用源 JSON 解析失败"
+            end
+        elseif ok then
+            last_err = "备用源 HTTP " .. tostring(code or "请求失败")
+            log_debug("[FanQie] 备用源 HTTP 失败:", "url=" .. url, "code=" .. tostring(code or "请求失败"))
+        else
+            last_err = "备用源请求失败: " .. tostring(text or "unknown")
+            log_debug("[FanQie] 备用源请求异常:", "url=" .. url, "error=" .. tostring(text or "unknown"))
+        end
+    end
+    error(last_err)
+end
+
 
 return Client

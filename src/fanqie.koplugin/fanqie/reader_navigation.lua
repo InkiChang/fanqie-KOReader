@@ -197,8 +197,8 @@ function ReaderNavigation:preDownloadChapters(book, chapters, current_index)
     if _state.pre_download_triggered then return end
     _state.pre_download_triggered = true
 
-    local cache = self.settings:get("cache", {})
-    local pre_download_count = cache.pre_download_chapters or 3
+    local cache = self.settings:get("cache")
+    local pre_download_count = tonumber(cache.pre_download_chapters) or 3
     local start_idx = current_index + 1
     local end_idx = math.min(current_index + pre_download_count, #chapters)
 

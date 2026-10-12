@@ -118,7 +118,7 @@ end)
 ```
 
 类型用 `feat` `fix` `docs` `test` `refactor` `chore` `perf` `build` `ci`。
-范围写模块名，如 `cookie`、`epub`、`mobile`、`docs`。
+范围写模块名，如 `content`、`sources`、`device`、`docs`。
 
 ```
 fix(cookie): curl 单引号参数被错误截断

@@ -65,13 +65,17 @@ local defaults = {
         },
     },
     -- Book source management (replaces hardcoded qingtian->official fallback)
-    -- 书源：**只保留官方移动端源**（其余书源已按需求删除）
     sources = {
         official_app = {
             enabled = true,
             order = 0,
             install_id = "",       -- 留空时从 <数据目录>/fanqie_device.json 读；都没有才尝试自动注册
             device_id = "",
+            rate_limit = { max_requests = 0, window_seconds = 0 },
+        },
+        official_proxy = {
+            enabled = true,
+            order = 1,
             rate_limit = { max_requests = 0, window_seconds = 0 },
         },
     },
@@ -93,6 +97,19 @@ end
 -- One-time migration: merge legacy `qingtian` settings into `sources.qingtian`.
 -- Only runs when sources_version < 1. Overwrites default empty values with the
 -- user's actual legacy config (so real account/password/token are carried over).
+-- Merge nested defaults into older settings files that contain partial tables.
+local function merge_defaults(value, default)
+    if type(value) ~= "table" or type(default) ~= "table" then return value end
+    for key, fallback in pairs(default) do
+        if value[key] == nil then
+            value[key] = deepcopy(fallback)
+        elseif type(value[key]) == "table" and type(fallback) == "table" then
+            merge_defaults(value[key], fallback)
+        end
+    end
+    return value
+end
+
 local function migrate_legacy_qingtian(store)
     local legacy = store:readSetting("qingtian", nil)
     if legacy and type(legacy) == "table" then
@@ -198,7 +215,7 @@ function Settings:get(key, default)
         default = defaults[key]
     end
     local result = self.store:readSetting(key, deepcopy(default))
-    return result
+    return merge_defaults(result, default)
 end
 
 function Settings:set(key, value)
